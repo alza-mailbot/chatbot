@@ -35,6 +35,25 @@ just run
 
 *Done when:* `curl localhost:8080/healthz` returns `{"status":"ok"}`.
 
+## API
+
+### `POST /v1/chat`
+
+Generates a reply to an email. Accepts `multipart/form-data`:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `body` | text | yes | Plain-text email body |
+| `subject` | text | no | Email subject line |
+
+```bash
+curl -s localhost:8080/v1/chat \
+  -F subject="Warranty question" \
+  -F body="Hi, how long is the warranty on a laptop bought last year?"
+```
+
+Response: `{"reply": "..."}`. Errors: `422` invalid input, `502` LLM failure, `500` unexpected error.
+
 ## Development
 
 | Command | Description |
@@ -42,6 +61,7 @@ just run
 | `just` | List all recipes |
 | `just run` | Start the dev server (auto-reload, port 8080) |
 | `just test` | Run all tests (`just test-unit`, `just test-integration` for subsets) |
+| `uv run pytest -m live` | Run live tests against real Vertex AI (needs ADC + `.env`) |
 | `just check` | Lint + type-check |
 | `just fix` | Format + auto-fix lint issues |
 | `just pre-commit` | Run all pre-commit checks manually |

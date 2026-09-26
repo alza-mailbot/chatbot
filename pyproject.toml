@@ -20,7 +20,7 @@ packages = ["src/chatbot"]
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
+    "httpx2>=2.13.1",
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
@@ -46,3 +46,9 @@ indent-style = "space"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-m 'not live'"
+markers = ["live: calls real external services; excluded by default"]
+filterwarnings = [
+    # google-genai still uses typing internals deprecated in Python 3.14; fixed upstream, not by us
+    "ignore:'_UnionGenericAlias' is deprecated:DeprecationWarning:google.genai.types",
+]
