@@ -8,6 +8,7 @@ import pytest
 from chatbot.config import Settings
 from chatbot.core.attachments import Attachment
 from chatbot.core.llm.gemini import GeminiClient, LLMError
+from chatbot.models.chat import ThreadMessage
 
 
 def _make_settings() -> Settings:
@@ -83,26 +84,44 @@ class TestGenerateReply:
         assert "My laptop broke." in contents
 
     async def test_attachments_become_parts_before_text(self) -> None:
-        """Verify attachments are passed as inline parts, with the text last."""
+        """Verify attachments are inline parts of the current turn, with the text last."""
         client, generate, _ = _make_client()
         attachment = Attachment(filename="doc.pdf", mime_type="application/pdf", data=b"%PDF")
 
         await client.generate_reply(subject="S", body="B", attachments=[attachment])
 
-        contents = generate.call_args.kwargs["contents"]
-        assert contents[0].inline_data.mime_type == "application/pdf"
-        assert contents[0].inline_data.data == b"%PDF"
-        assert "S" in contents[-1]
-        assert "B" in contents[-1]
+        current = generate.call_args.kwargs["contents"][-1]
+        assert current.parts[0].inline_data.mime_type == "application/pdf"
+        assert current.parts[0].inline_data.data == b"%PDF"
+        assert "S" in current.parts[-1].text
+        assert "B" in current.parts[-1].text
 
-    async def test_no_attachments_sends_text_only(self) -> None:
-        """Verify the prompt contains a single text entry when no attachments come in."""
+    async def test_no_attachments_sends_single_user_turn(self) -> None:
+        """Verify the prompt is one user turn when no attachments or history come in."""
         client, generate, _ = _make_client()
 
         await client.generate_reply(subject="S", body="B")
 
         contents = generate.call_args.kwargs["contents"]
         assert len(contents) == 1
+        assert contents[0].role == "user"
+
+    async def test_thread_history_becomes_role_turns(self) -> None:
+        """Verify prior messages precede the current turn with mapped roles."""
+        client, generate, _ = _make_client()
+        thread = [
+            ThreadMessage(role="user", text="Q1"),
+            ThreadMessage(role="assistant", text="A1"),
+        ]
+
+        await client.generate_reply(subject="S", body="Follow-up", thread=thread)
+
+        contents = generate.call_args.kwargs["contents"]
+        assert len(contents) == 3
+        assert (contents[0].role, contents[0].parts[0].text) == ("user", "Q1")
+        assert (contents[1].role, contents[1].parts[0].text) == ("model", "A1")
+        assert contents[2].role == "user"
+        assert "Follow-up" in contents[2].parts[-1].text
 
     async def test_sdk_error_raises_llm_error(self) -> None:
         """Verify an SDK failure surfaces as LLMError with the original cause."""

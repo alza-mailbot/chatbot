@@ -7,6 +7,7 @@ from google.genai import types
 
 from chatbot.config import Settings
 from chatbot.core.attachments import Attachment
+from chatbot.models.chat import ThreadMessage
 
 
 class LLMError(Exception):
@@ -31,7 +32,11 @@ class GeminiClient:
         self._system_prompt = settings.system_prompt
 
     async def generate_reply(
-        self, subject: str, body: str, attachments: Sequence[Attachment] = ()
+        self,
+        subject: str,
+        body: str,
+        attachments: Sequence[Attachment] = (),
+        thread: Sequence[ThreadMessage] = (),
     ) -> str:
         """Generate a reply to an email.
 
@@ -39,6 +44,7 @@ class GeminiClient:
             subject: Email subject line.
             body: Plain-text email body.
             attachments: Validated attachments included in the prompt.
+            thread: Prior thread messages in chronological order.
 
         Returns:
             str: The generated reply text.
@@ -46,10 +52,18 @@ class GeminiClient:
         Raises:
             LLMError: If the model call fails or returns no text.
         """
-        contents: list[types.Part | str] = [
+        history = [
+            types.Content(
+                role="user" if message.role == "user" else "model",
+                parts=[types.Part.from_text(text=message.text)],
+            )
+            for message in thread
+        ]
+        current_parts = [
             types.Part.from_bytes(data=a.data, mime_type=a.mime_type) for a in attachments
         ]
-        contents.append(f"Subject: {subject}\n\n{body}")
+        current_parts.append(types.Part.from_text(text=f"Subject: {subject}\n\n{body}"))
+        contents = [*history, types.Content(role="user", parts=current_parts)]
         try:
             response = await self._client.aio.models.generate_content(
                 model=self._model,
