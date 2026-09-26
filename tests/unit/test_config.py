@@ -10,7 +10,7 @@ class TestSettings:
     """Tests for the Settings model."""
 
     def test_defaults_without_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Verify default values apply when no environment variables are set."""
+        """Verify default values apply when no optional environment variables are set."""
         monkeypatch.delenv("LOG_LEVEL", raising=False)
         monkeypatch.delenv("PORT", raising=False)
 
@@ -18,6 +18,16 @@ class TestSettings:
 
         assert settings.log_level == "INFO"
         assert settings.port == 8080
+        assert settings.gcp_location == "global"
+        assert settings.gemini_model == "gemini-2.5-flash"
+        assert settings.system_prompt
+
+    def test_missing_project_id_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verify settings fail fast when the required GCP project id is absent."""
+        monkeypatch.delenv("GCP_PROJECT_ID", raising=False)
+
+        with pytest.raises(ValidationError):
+            Settings(_env_file=None)
 
     def test_environment_overrides_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify an environment variable overrides the default value."""
