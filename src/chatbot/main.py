@@ -22,7 +22,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     Yields:
         None: Control while the application serves requests.
     """
-    app.state.gemini = GeminiClient(get_settings())
+    settings = get_settings()
+    app.state.settings = settings
+    app.state.gemini = GeminiClient(settings)
     logger.info("[APP] Starting up")
     yield
     logger.info("[APP] Shutting down")

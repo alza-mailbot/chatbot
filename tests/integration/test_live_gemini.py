@@ -3,11 +3,16 @@
 Run explicitly with: uv run pytest -m live
 """
 
+from pathlib import Path
+
 import pytest
 from dotenv import dotenv_values
 
 from chatbot.config import Settings
+from chatbot.core.attachments import Attachment
 from chatbot.core.llm.gemini import GeminiClient
+
+_FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 
 def _real_settings() -> Settings:
@@ -35,3 +40,20 @@ class TestLiveGemini:
         )
 
         assert reply.strip()
+
+    async def test_reads_pdf_attachment(self) -> None:
+        """Verify Gemini extracts information from an attached PDF."""
+        client = GeminiClient(_real_settings())
+        pdf = Attachment(
+            filename="sample.pdf",
+            mime_type="application/pdf",
+            data=(_FIXTURES / "sample.pdf").read_bytes(),
+        )
+
+        reply = await client.generate_reply(
+            subject="Document check",
+            body="What is the secret word in the attached document? Answer with just the word.",
+            attachments=[pdf],
+        )
+
+        assert "PINEAPPLE" in reply.upper()

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from chatbot.config import Settings
+from chatbot.core.attachments import Attachment
 from chatbot.core.llm.gemini import GeminiClient, LLMError
 
 
@@ -80,6 +81,28 @@ class TestGenerateReply:
         contents = str(generate.call_args.kwargs["contents"])
         assert "Warranty claim" in contents
         assert "My laptop broke." in contents
+
+    async def test_attachments_become_parts_before_text(self) -> None:
+        """Verify attachments are passed as inline parts, with the text last."""
+        client, generate, _ = _make_client()
+        attachment = Attachment(filename="doc.pdf", mime_type="application/pdf", data=b"%PDF")
+
+        await client.generate_reply(subject="S", body="B", attachments=[attachment])
+
+        contents = generate.call_args.kwargs["contents"]
+        assert contents[0].inline_data.mime_type == "application/pdf"
+        assert contents[0].inline_data.data == b"%PDF"
+        assert "S" in contents[-1]
+        assert "B" in contents[-1]
+
+    async def test_no_attachments_sends_text_only(self) -> None:
+        """Verify the prompt contains a single text entry when no attachments come in."""
+        client, generate, _ = _make_client()
+
+        await client.generate_reply(subject="S", body="B")
+
+        contents = generate.call_args.kwargs["contents"]
+        assert len(contents) == 1
 
     async def test_sdk_error_raises_llm_error(self) -> None:
         """Verify an SDK failure surfaces as LLMError with the original cause."""

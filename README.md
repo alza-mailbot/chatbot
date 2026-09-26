@@ -45,14 +45,18 @@ Generates a reply to an email. Accepts `multipart/form-data`:
 | --- | --- | --- | --- |
 | `body` | text | yes | Plain-text email body |
 | `subject` | text | no | Email subject line |
+| `files` | file(s) | no | Attachments: PDF, JPEG, PNG, MP3 or WAV, up to 15 MiB each |
 
 ```bash
 curl -s localhost:8080/v1/chat \
   -F subject="Warranty question" \
-  -F body="Hi, how long is the warranty on a laptop bought last year?"
+  -F body="Hi, how long is the warranty on a laptop bought last year?" \
+  -F files=@invoice.pdf
 ```
 
-Response: `{"reply": "..."}`. Errors: `422` invalid input, `502` LLM failure, `500` unexpected error.
+Response: `{"reply": "..."}`. Errors: `422` invalid input or unsupported/empty attachment (the `detail` message names the file and the supported types), `413` attachment over the size limit, `502` LLM failure, `500` unexpected error.
+
+An unsupported attachment rejects the whole request rather than being silently ignored, so the caller can tell the sender which file could not be processed.
 
 ## Development
 
