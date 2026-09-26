@@ -35,7 +35,7 @@ just run
 
 *Done when:* `curl localhost:8080/healthz` returns `{"status":"ok"}`.
 
-## API
+## API (contract v1, frozen)
 
 ### `POST /v1/chat`
 
@@ -45,14 +45,18 @@ Generates a reply to an email. Accepts `multipart/form-data`:
 | --- | --- | --- | --- |
 | `body` | text | yes | Plain-text email body |
 | `subject` | text | no | Email subject line |
+| `thread` | text | no | Prior thread messages as a JSON array of `{"role": "user"\|"assistant", "text": "..."}`, oldest first |
 | `files` | file(s) | no | Attachments: PDF, JPEG, PNG, MP3 or WAV, up to 15 MiB each |
 
 ```bash
 curl -s localhost:8080/v1/chat \
-  -F subject="Warranty question" \
-  -F body="Hi, how long is the warranty on a laptop bought last year?" \
+  -F subject="Re: Warranty question" \
+  -F body="And does the warranty cover the battery?" \
+  -F thread='[{"role":"user","text":"How long is the warranty?"},{"role":"assistant","text":"Two years."}]' \
   -F files=@invoice.pdf
 ```
+
+The service is stateless: thread history is supplied by the caller on every request. This contract is guarded by `TestContractV1` in the integration suite.
 
 Response: `{"reply": "..."}`. Errors: `422` invalid input or unsupported/empty attachment (the `detail` message names the file and the supported types), `413` attachment over the size limit, `502` LLM failure, `500` unexpected error.
 

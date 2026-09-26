@@ -12,7 +12,7 @@ from chatbot.core.attachments import (
     validate_attachment,
 )
 from chatbot.core.llm.gemini import GeminiClient, LLMError
-from chatbot.models.chat import ChatResponse
+from chatbot.models.chat import ChatResponse, parse_thread
 from chatbot.utils.logger import logger
 
 router = APIRouter()
@@ -55,6 +55,7 @@ async def chat(
     request: Request,
     body: Annotated[str, Form()],
     subject: Annotated[str, Form()] = "",
+    thread: Annotated[str | None, Form()] = None,
     files: Annotated[list[UploadFile] | None, File()] = None,
 ) -> ChatResponse:
     """Generate a reply to an incoming email.
@@ -63,20 +64,27 @@ async def chat(
         request: Current request, used to access shared app resources.
         body: Plain-text email body.
         subject: Email subject line.
+        thread: Prior thread messages as a JSON array of {role, text}.
         files: Optional attachments (PDF, image or audio).
 
     Returns:
         ChatResponse: The generated reply.
 
     Raises:
-        HTTPException: 413/422 for bad attachments, 502 when the LLM fails,
-            500 on unexpected errors.
+        HTTPException: 413/422 for bad attachments or thread, 502 when the
+            LLM fails, 500 on unexpected errors.
     """
     gemini: GeminiClient = request.app.state.gemini
     settings: Settings = request.app.state.settings
+    try:
+        thread_messages = parse_thread(thread)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid thread field: {exc}") from exc
     attachments = await _read_attachments(files or [], max_bytes=settings.max_attachment_bytes)
     try:
-        reply = await gemini.generate_reply(subject=subject, body=body, attachments=attachments)
+        reply = await gemini.generate_reply(
+            subject=subject, body=body, attachments=attachments, thread=thread_messages
+        )
     except LLMError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:

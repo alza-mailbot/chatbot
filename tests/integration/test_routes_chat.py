@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from chatbot.config import Settings
 from chatbot.core.llm.gemini import GeminiClient, LLMError
 from chatbot.main import app
+from chatbot.models.chat import ThreadMessage
 
 _MAX_BYTES = 64
 
@@ -43,7 +44,7 @@ class TestChat:
         assert response.status_code == 200
         assert response.json() == {"reply": "Generated reply"}
         gemini_mock.generate_reply.assert_awaited_once_with(
-            subject="Warranty", body="My laptop broke.", attachments=[]
+            subject="Warranty", body="My laptop broke.", attachments=[], thread=[]
         )
 
     def test_subject_is_optional(self, client: TestClient, gemini_mock: AsyncMock) -> None:
@@ -52,7 +53,7 @@ class TestChat:
 
         assert response.status_code == 200
         gemini_mock.generate_reply.assert_awaited_once_with(
-            subject="", body="Hello?", attachments=[]
+            subject="", body="Hello?", attachments=[], thread=[]
         )
 
     def test_missing_body_is_rejected(self, client: TestClient, gemini_mock: AsyncMock) -> None:
@@ -82,6 +83,71 @@ class TestChat:
 
         assert response.status_code == 500
         assert "Unexpected error" in caplog.text
+
+
+class TestChatThread:
+    """Tests for POST /v1/chat with thread history."""
+
+    def test_thread_field_reaches_the_llm(self, client: TestClient, gemini_mock: AsyncMock) -> None:
+        """Verify the thread JSON field is parsed and passed to the LLM client."""
+        thread_json = '[{"role": "user", "text": "Q1"}, {"role": "assistant", "text": "A1"}]'
+
+        response = client.post("/v1/chat", data={"body": "Follow-up.", "thread": thread_json})
+
+        assert response.status_code == 200
+        thread = gemini_mock.generate_reply.await_args.kwargs["thread"]
+        assert thread == [
+            ThreadMessage(role="user", text="Q1"),
+            ThreadMessage(role="assistant", text="A1"),
+        ]
+
+    def test_invalid_thread_json_is_rejected(
+        self, client: TestClient, gemini_mock: AsyncMock
+    ) -> None:
+        """Verify malformed thread JSON yields 422 and skips the LLM."""
+        response = client.post("/v1/chat", data={"body": "Hello?", "thread": "not json"})
+
+        assert response.status_code == 422
+        assert "thread" in response.json()["detail"].lower()
+        gemini_mock.generate_reply.assert_not_awaited()
+
+    def test_invalid_thread_role_is_rejected(
+        self, client: TestClient, gemini_mock: AsyncMock
+    ) -> None:
+        """Verify a thread message with an unknown role yields 422."""
+        response = client.post(
+            "/v1/chat",
+            data={"body": "Hello?", "thread": '[{"role": "system", "text": "X"}]'},
+        )
+
+        assert response.status_code == 422
+        gemini_mock.generate_reply.assert_not_awaited()
+
+
+class TestContractV1:
+    """Guards the frozen v1 request/response contract. Do not change lightly."""
+
+    def test_full_request_shape(self, client: TestClient, gemini_mock: AsyncMock) -> None:
+        """Verify the complete v1 request is accepted and answered as {reply: str}."""
+        response = client.post(
+            "/v1/chat",
+            data={
+                "subject": "Warranty claim",
+                "body": "See the attached invoice.",
+                "thread": '[{"role": "user", "text": "Q1"}, {"role": "assistant", "text": "A1"}]',
+            },
+            files=[("files", ("invoice.pdf", b"%PDF-1.4", "application/pdf"))],
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert set(payload.keys()) == {"reply"}
+        assert isinstance(payload["reply"], str)
+        kwargs = gemini_mock.generate_reply.await_args.kwargs
+        assert kwargs["subject"] == "Warranty claim"
+        assert kwargs["body"] == "See the attached invoice."
+        assert len(kwargs["thread"]) == 2
+        assert len(kwargs["attachments"]) == 1
 
 
 class TestChatAttachments:

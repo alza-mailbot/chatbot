@@ -11,6 +11,7 @@ from dotenv import dotenv_values
 from chatbot.config import Settings
 from chatbot.core.attachments import Attachment
 from chatbot.core.llm.gemini import GeminiClient
+from chatbot.models.chat import ThreadMessage
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
 
@@ -57,3 +58,19 @@ class TestLiveGemini:
         )
 
         assert "PINEAPPLE" in reply.upper()
+
+    async def test_uses_thread_context(self) -> None:
+        """Verify the reply draws on information present only in the thread history."""
+        client = GeminiClient(_real_settings())
+        thread = [
+            ThreadMessage(role="user", text="My order number is 77812. The delivery is late."),
+            ThreadMessage(role="assistant", text="I am sorry, I will look into order 77812."),
+        ]
+
+        reply = await client.generate_reply(
+            subject="Re: Late delivery",
+            body="What was my order number again? Answer with just the number.",
+            thread=thread,
+        )
+
+        assert "77812" in reply
