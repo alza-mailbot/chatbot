@@ -76,3 +76,14 @@ sync-frozen:
 # Upgrade dependencies and sync
 update:
     uv sync --upgrade
+
+# Build the Docker image
+docker-build:
+    docker build -t chatbot .
+
+# Run the container locally (mounts gcloud ADC for Vertex AI access)
+docker-run:
+    docker run --rm -p 8080:8080 --env-file .env \
+      -v ~/.config/gcloud/application_default_credentials.json:/adc.json:ro \
+      -e GOOGLE_APPLICATION_CREDENTIALS=/adc.json \
+      chatbot

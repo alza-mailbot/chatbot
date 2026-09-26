@@ -62,6 +62,20 @@ Response: `{"reply": "..."}`. Errors: `422` invalid input or unsupported/empty a
 
 An unsupported attachment rejects the whole request rather than being silently ignored, so the caller can tell the sender which file could not be processed.
 
+## Run with Docker
+
+```bash
+just docker-build
+just docker-run
+```
+
+The container reads configuration from `.env` and authenticates to Vertex AI
+through your local gcloud Application Default Credentials, mounted read-only.
+In Cloud Run the same image authenticates via the service identity instead —
+no credentials are baked into the image.
+
+*Done when:* `curl localhost:8080/healthz` returns `{"status":"ok"}` against the container.
+
 ## Development
 
 | Command | Description |
