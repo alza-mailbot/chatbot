@@ -5,6 +5,7 @@ description = "AI email chatbot service for alza-mailbot — generates context-a
 requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.141.1",
+    "pydantic-settings>=2.15.0",
     "uvicorn>=0.54.0",
 ]
 
