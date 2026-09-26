@@ -27,11 +27,20 @@ It works alongside the `email-processor` service, which receives Gmail push noti
    ```
    *Done when:* `just pre-commit` passes on all files.
 
+## Run
+
+```bash
+just run
+```
+
+*Done when:* `curl localhost:8080/healthz` returns `{"status":"ok"}`.
+
 ## Development
 
 | Command | Description |
 | --- | --- |
 | `just` | List all recipes |
+| `just run` | Start the dev server (auto-reload, port 8080) |
 | `just test` | Run all tests (`just test-unit`, `just test-integration` for subsets) |
 | `just check` | Lint + type-check |
 | `just fix` | Format + auto-fix lint issues |
