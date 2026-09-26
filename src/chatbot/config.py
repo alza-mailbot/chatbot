@@ -22,6 +22,7 @@ class Settings(BaseSettings):
         gcp_location: Vertex AI endpoint location.
         gemini_model: Gemini model name used for reply generation.
         system_prompt: System instruction defining the assistant persona.
+        max_attachment_bytes: Maximum accepted size of a single attachment.
     """
 
     model_config = SettingsConfigDict(env_file=".env")
@@ -32,6 +33,7 @@ class Settings(BaseSettings):
     gcp_location: str = "global"
     gemini_model: str = "gemini-2.5-flash"
     system_prompt: str = _DEFAULT_SYSTEM_PROMPT
+    max_attachment_bytes: int = 15 * 1024 * 1024
 
 
 @lru_cache

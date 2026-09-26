@@ -21,6 +21,7 @@ class TestSettings:
         assert settings.gcp_location == "global"
         assert settings.gemini_model == "gemini-2.5-flash"
         assert settings.system_prompt
+        assert settings.max_attachment_bytes == 15 * 1024 * 1024
 
     def test_missing_project_id_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify settings fail fast when the required GCP project id is absent."""
