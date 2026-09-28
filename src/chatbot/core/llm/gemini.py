@@ -1,6 +1,7 @@
 """Gemini LLM client backed by Vertex AI."""
 
 from collections.abc import Sequence
+from datetime import date
 
 from google import genai
 from google.genai import types
@@ -55,7 +56,12 @@ class GeminiClient:
                 model=self._model,
                 contents=contents,
                 config=types.GenerateContentConfig(
-                    system_instruction=self._system_prompt, tools=tools
+                    # the model has no clock; without today's date it cannot
+                    # tell current events from its training-data past
+                    system_instruction=(
+                        f"{self._system_prompt}\nToday's date: {date.today().isoformat()}."
+                    ),
+                    tools=tools,
                 ),
             )
         except Exception as exc:
