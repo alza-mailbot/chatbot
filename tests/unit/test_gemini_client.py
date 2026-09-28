@@ -1,5 +1,6 @@
 """Unit tests for the Gemini LLM client. The google-genai SDK is mocked."""
 
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -72,7 +73,7 @@ class TestGenerateReply:
 
         kwargs = generate.call_args.kwargs
         assert kwargs["model"] == "gemini-test"
-        assert kwargs["config"].system_instruction == "Test persona"
+        assert kwargs["config"].system_instruction.startswith("Test persona")
 
     async def test_contents_include_subject_and_body(self) -> None:
         """Verify both subject and body are part of the prompt contents."""
@@ -159,7 +160,17 @@ class TestGenerate:
 
         config = generate.call_args.kwargs["config"]
         assert config.tools == tools
-        assert config.system_instruction == "Test persona"
+        assert config.system_instruction.startswith("Test persona")
+
+    async def test_todays_date_follows_the_persona(self) -> None:
+        """Verify every call tells the model what day it is."""
+        client, generate, _ = _make_client()
+
+        await client.generate([_turn("turn")])
+
+        instruction = generate.call_args.kwargs["config"].system_instruction
+        assert instruction.startswith("Test persona")
+        assert date.today().isoformat() in instruction
 
     async def test_no_tools_by_default(self) -> None:
         """Verify the config declares no tools unless some are passed."""
