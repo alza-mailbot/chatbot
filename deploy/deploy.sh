@@ -16,7 +16,8 @@ gcloud run deploy chatbot \
   --region="${REGION}" \
   --service-account="${SA_CHATBOT}" \
   --no-allow-unauthenticated \
-  --set-env-vars="GCP_PROJECT_ID=${PROJECT_ID}" \
+  --set-env-vars="GCP_PROJECT_ID=${PROJECT_ID},WEB_SEARCH_ENABLED=true" \
+  --set-secrets="BRAVE_API_KEY=brave-api-key:latest" \
   --memory=1Gi \
   --max-instances=3
 
