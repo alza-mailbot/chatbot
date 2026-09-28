@@ -31,6 +31,36 @@ class GeminiClient:
         self._model = settings.gemini_model
         self._system_prompt = settings.system_prompt
 
+    async def generate(
+        self,
+        contents: list[types.Content],
+        *,
+        tools: list[types.Tool] | None = None,
+    ) -> types.GenerateContentResponse:
+        """Run one model call over an explicit conversation.
+
+        Args:
+            contents: Full conversation so far, oldest turn first.
+            tools: Function declarations offered to the model, if any.
+
+        Returns:
+            types.GenerateContentResponse: The whole response; it may carry
+                text or a function call, which is for the caller to decide.
+
+        Raises:
+            LLMError: If the model call fails.
+        """
+        try:
+            return await self._client.aio.models.generate_content(
+                model=self._model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=self._system_prompt, tools=tools
+                ),
+            )
+        except Exception as exc:
+            raise LLMError("Gemini request failed") from exc
+
     async def generate_reply(
         self,
         subject: str,
@@ -38,7 +68,7 @@ class GeminiClient:
         attachments: Sequence[Attachment] = (),
         thread: Sequence[ThreadMessage] = (),
     ) -> str:
-        """Generate a reply to an email.
+        """Generate a reply to an email in a single model call.
 
         Args:
             subject: Email subject line.
@@ -52,26 +82,41 @@ class GeminiClient:
         Raises:
             LLMError: If the model call fails or returns no text.
         """
-        history = [
-            types.Content(
-                role="user" if message.role == "user" else "model",
-                parts=[types.Part.from_text(text=message.text)],
-            )
-            for message in thread
-        ]
-        current_parts = [
-            types.Part.from_bytes(data=a.data, mime_type=a.mime_type) for a in attachments
-        ]
-        current_parts.append(types.Part.from_text(text=f"Subject: {subject}\n\n{body}"))
-        contents = [*history, types.Content(role="user", parts=current_parts)]
-        try:
-            response = await self._client.aio.models.generate_content(
-                model=self._model,
-                contents=contents,
-                config=types.GenerateContentConfig(system_instruction=self._system_prompt),
-            )
-        except Exception as exc:
-            raise LLMError("Gemini request failed") from exc
+        contents = build_contents(
+            subject=subject, body=body, attachments=attachments, thread=thread
+        )
+        response = await self.generate(contents)
         if not response.text:
             raise LLMError("Gemini returned an empty response")
         return response.text
+
+
+def build_contents(
+    *,
+    subject: str,
+    body: str,
+    attachments: Sequence[Attachment] = (),
+    thread: Sequence[ThreadMessage] = (),
+) -> list[types.Content]:
+    """Build the opening conversation for an email reply.
+
+    Args:
+        subject: Email subject line.
+        body: Plain-text email body.
+        attachments: Validated attachments included in the prompt.
+        thread: Prior thread messages in chronological order.
+
+    Returns:
+        list[types.Content]: Thread history followed by the current user
+            turn, attachments first and the email text last.
+    """
+    history = [
+        types.Content(
+            role="user" if message.role == "user" else "model",
+            parts=[types.Part.from_text(text=message.text)],
+        )
+        for message in thread
+    ]
+    current_parts = [types.Part.from_bytes(data=a.data, mime_type=a.mime_type) for a in attachments]
+    current_parts.append(types.Part.from_text(text=f"Subject: {subject}\n\n{body}"))
+    return [*history, types.Content(role="user", parts=current_parts)]

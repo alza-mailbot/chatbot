@@ -4,10 +4,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from google.genai import types
 
 from chatbot.config import Settings
 from chatbot.core.attachments import Attachment
-from chatbot.core.llm.gemini import GeminiClient, LLMError
+from chatbot.core.llm.gemini import GeminiClient, LLMError, build_contents
 from chatbot.models.chat import ThreadMessage
 
 
@@ -122,6 +123,86 @@ class TestGenerateReply:
         assert (contents[1].role, contents[1].parts[0].text) == ("model", "A1")
         assert contents[2].role == "user"
         assert "Follow-up" in contents[2].parts[-1].text
+
+
+def _turn(text: str) -> types.Content:
+    """Build one user turn with the given text."""
+    return types.Content(role="user", parts=[types.Part.from_text(text=text)])
+
+
+class TestGenerate:
+    """Tests for the low-level GeminiClient.generate call."""
+
+    async def test_passthrough_of_prebuilt_contents(self) -> None:
+        """Verify generate sends the given contents unchanged to the SDK."""
+        client, generate, _ = _make_client()
+        contents = [_turn("turn-1"), _turn("turn-2")]
+
+        await client.generate(contents)
+
+        assert generate.call_args.kwargs["contents"] is contents
+
+    async def test_returns_full_response_object(self) -> None:
+        """Verify the caller gets the whole response, not just its text."""
+        client, generate, _ = _make_client()
+
+        response = await client.generate([_turn("turn")])
+
+        assert response is generate.return_value
+
+    async def test_tools_reach_the_config(self) -> None:
+        """Verify declared tools travel inside the request config."""
+        client, generate, _ = _make_client()
+        tools = [types.Tool(function_declarations=[types.FunctionDeclaration(name="t")])]
+
+        await client.generate([_turn("turn")], tools=tools)
+
+        config = generate.call_args.kwargs["config"]
+        assert config.tools == tools
+        assert config.system_instruction == "Test persona"
+
+    async def test_no_tools_by_default(self) -> None:
+        """Verify the config declares no tools unless some are passed."""
+        client, generate, _ = _make_client()
+
+        await client.generate([_turn("turn")])
+
+        assert generate.call_args.kwargs["config"].tools is None
+
+    async def test_generate_sdk_error_raises_llm_error(self) -> None:
+        """Verify an SDK failure in the low-level call surfaces as LLMError."""
+        client, generate, _ = _make_client()
+        generate.side_effect = RuntimeError("boom")
+
+        with pytest.raises(LLMError):
+            await client.generate([_turn("turn")])
+
+
+class TestBuildContents:
+    """Tests for the prompt builder shared by the plain path and the agent."""
+
+    def test_thread_then_current_turn_with_attachments(self) -> None:
+        """Verify history precedes the current turn and attachments precede text."""
+        thread = [
+            ThreadMessage(role="user", text="Q1"),
+            ThreadMessage(role="assistant", text="A1"),
+        ]
+        attachment = Attachment(filename="doc.pdf", mime_type="application/pdf", data=b"%PDF")
+
+        contents = build_contents(subject="S", body="B", attachments=[attachment], thread=thread)
+
+        assert [content.role for content in contents] == ["user", "model", "user"]
+        parts = contents[-1].parts
+        assert parts is not None
+        assert parts[0].inline_data is not None
+        assert parts[0].inline_data.mime_type == "application/pdf"
+        assert parts[-1].text is not None
+        assert "S" in parts[-1].text
+        assert "B" in parts[-1].text
+
+
+class TestGenerateReplyErrors:
+    """Tests for error mapping of GeminiClient.generate_reply."""
 
     async def test_sdk_error_raises_llm_error(self) -> None:
         """Verify an SDK failure surfaces as LLMError with the original cause."""
