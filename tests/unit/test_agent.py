@@ -210,3 +210,36 @@ class TestLimits:
 
         with pytest.raises(LLMError):
             await _run(gemini, {})
+
+
+class TestBlankArguments:
+    """Tests for refusing degenerate tool arguments."""
+
+    async def test_empty_query_is_refused_without_calling(self) -> None:
+        """Verify a blank search query never reaches Brave."""
+        gemini = _gemini(
+            _call_response(("web_search", {"query": "   "})),
+            _text_response("Answer"),
+        )
+        search = AsyncMock(return_value=_results())
+
+        reply = await _run(gemini, {"web_search": search})
+
+        assert reply == "Answer"
+        search.assert_not_awaited()
+        contents = gemini.generate.await_args_list[1].args[0]
+        assert "error" in str(contents[-1].parts[0].function_response.response)
+
+    async def test_blank_result_url_never_enters_the_whitelist(self) -> None:
+        """Verify an empty url from search cannot authorize an empty fetch."""
+        gemini = _gemini(
+            _call_response(("web_search", {"query": "q"})),
+            _call_response(("fetch_page", {"url": ""})),
+            _text_response("Answer"),
+        )
+        search = AsyncMock(return_value=_results(""))
+        fetch = AsyncMock(return_value="text")
+
+        await _run(gemini, {"web_search": search, "fetch_page": fetch})
+
+        fetch.assert_not_awaited()

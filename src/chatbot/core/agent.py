@@ -122,8 +122,11 @@ async def _dispatch(
         return {"error": f"Unknown tool {name!r}"}
     try:
         if name == "web_search":
-            results: list[SearchResult] = await tool(str(args.get("query", "")))
-            allowed_urls.update(result.url for result in results)
+            query = str(args.get("query", "")).strip()
+            if not query:
+                return {"error": "web_search requires a non-empty query"}
+            results: list[SearchResult] = await tool(query)
+            allowed_urls.update(result.url for result in results if result.url)
             return {"results": [result.model_dump() for result in results]}
         if name == "fetch_page":
             url = str(args.get("url", ""))
