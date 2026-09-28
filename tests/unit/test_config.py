@@ -46,6 +46,41 @@ class TestSettings:
             Settings(_env_file=None)
 
 
+class TestWebSearchSettings:
+    """Tests for the web search feature configuration."""
+
+    def test_disabled_by_default_without_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verify web search is off and keyless unless explicitly configured."""
+        monkeypatch.delenv("WEB_SEARCH_ENABLED", raising=False)
+        monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+
+        settings = Settings(_env_file=None)
+
+        assert settings.web_search_enabled is False
+        assert settings.brave_api_key is None
+        assert settings.brave_max_results == 5
+        assert settings.agent_max_iterations == 6
+        assert settings.agent_deadline_seconds == 90
+
+    def test_enabled_with_key_from_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verify the flag and key are read from the environment together."""
+        monkeypatch.setenv("WEB_SEARCH_ENABLED", "true")
+        monkeypatch.setenv("BRAVE_API_KEY", "test-key")
+
+        settings = Settings(_env_file=None)
+
+        assert settings.web_search_enabled is True
+        assert settings.brave_api_key == "test-key"
+
+    def test_enabled_without_key_fails_fast(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verify a misconfiguration is rejected at startup, not at request time."""
+        monkeypatch.setenv("WEB_SEARCH_ENABLED", "true")
+        monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+
+        with pytest.raises(ValidationError):
+            Settings(_env_file=None)
+
+
 class TestGetSettings:
     """Tests for the cached settings accessor."""
 

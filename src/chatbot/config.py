@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEFAULT_SYSTEM_PROMPT = (
@@ -30,6 +31,11 @@ class Settings(BaseSettings):
         gemini_model: Gemini model name used for reply generation.
         system_prompt: System instruction defining the assistant persona.
         max_attachment_bytes: Maximum accepted size of a single attachment.
+        web_search_enabled: Offer the web search tools to the model.
+        brave_api_key: Brave Search API subscription token.
+        brave_max_results: Maximum search results returned to the model.
+        agent_max_iterations: Tool-call rounds before an answer is forced.
+        agent_deadline_seconds: Wall-clock budget for the whole agent loop.
     """
 
     model_config = SettingsConfigDict(env_file=".env")
@@ -41,6 +47,18 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"
     system_prompt: str = _DEFAULT_SYSTEM_PROMPT
     max_attachment_bytes: int = 15 * 1024 * 1024
+    web_search_enabled: bool = False
+    brave_api_key: str | None = None
+    brave_max_results: int = 5
+    agent_max_iterations: int = 6
+    agent_deadline_seconds: float = 90
+
+    @model_validator(mode="after")
+    def _require_key_when_enabled(self) -> Settings:
+        """Reject web search without a key at startup, not at request time."""
+        if self.web_search_enabled and not self.brave_api_key:
+            raise ValueError("WEB_SEARCH_ENABLED requires BRAVE_API_KEY to be set")
+        return self
 
 
 @lru_cache
