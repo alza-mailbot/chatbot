@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     web_search_enabled: bool = False
     brave_api_key: str | None = None
     brave_max_results: int = 5
-    agent_max_iterations: int = 6
+    agent_max_iterations: int = 4
     agent_deadline_seconds: float = 90
 
     @model_validator(mode="after")
