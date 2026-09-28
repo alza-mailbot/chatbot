@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from chatbot.config import Settings
+from chatbot.core.agent import run_agent
 from chatbot.core.attachments import (
     Attachment,
     AttachmentError,
@@ -82,8 +83,15 @@ async def chat(
         raise HTTPException(status_code=422, detail=f"Invalid thread field: {exc}") from exc
     attachments = await _read_attachments(files or [], max_bytes=settings.max_attachment_bytes)
     try:
-        reply = await gemini.generate_reply(
-            subject=subject, body=body, attachments=attachments, thread=thread_messages
+        reply = await run_agent(
+            gemini,
+            subject=subject,
+            body=body,
+            attachments=attachments,
+            thread=thread_messages,
+            tools=request.app.state.web_tools,
+            max_iterations=settings.agent_max_iterations,
+            deadline_seconds=settings.agent_deadline_seconds,
         )
     except LLMError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

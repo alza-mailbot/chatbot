@@ -1,7 +1,8 @@
-"""Integration tests for POST /v1/chat. The Gemini client is replaced by a mock."""
+"""Integration tests for POST /v1/chat. The agent entry point is patched."""
 
 from collections.abc import Iterator
-from unittest.mock import AsyncMock
+from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,57 +16,67 @@ _MAX_BYTES = 64
 
 
 @pytest.fixture()
-def gemini_mock() -> Iterator[AsyncMock]:
-    """Install a mocked Gemini client and small-limit settings into the app state.
+def agent_mock() -> Iterator[AsyncMock]:
+    """Patch run_agent and install app state the route needs.
 
     Yields:
-        AsyncMock: The mock standing in for the shared GeminiClient.
+        AsyncMock: The mock standing in for the agent entry point.
     """
-    mock = AsyncMock(spec=GeminiClient)
-    mock.generate_reply.return_value = "Generated reply"
-    app.state.gemini = mock
-    app.state.settings = Settings(
-        _env_file=None, gcp_project_id="test-project", max_attachment_bytes=_MAX_BYTES
-    )
-    try:
-        yield mock
-    finally:
-        del app.state.gemini
-        del app.state.settings
+    with patch("chatbot.api.routes_chat.run_agent", new_callable=AsyncMock) as mock:
+        mock.return_value = "Generated reply"
+        app.state.gemini = AsyncMock(spec=GeminiClient)
+        app.state.web_tools = {}
+        app.state.settings = Settings(
+            _env_file=None, gcp_project_id="test-project", max_attachment_bytes=_MAX_BYTES
+        )
+        try:
+            yield mock
+        finally:
+            del app.state.gemini
+            del app.state.web_tools
+            del app.state.settings
+
+
+def _call(mock: AsyncMock) -> Any:
+    """Return the recorded await call, failing loudly when there is none."""
+    assert mock.await_args is not None
+    return mock.await_args
 
 
 class TestChat:
     """Tests for POST /v1/chat."""
 
-    def test_returns_generated_reply(self, client: TestClient, gemini_mock: AsyncMock) -> None:
+    def test_returns_generated_reply(self, client: TestClient, agent_mock: AsyncMock) -> None:
         """Verify a valid request returns the reply produced by the LLM client."""
         response = client.post("/v1/chat", data={"subject": "Warranty", "body": "My laptop broke."})
 
         assert response.status_code == 200
         assert response.json() == {"reply": "Generated reply"}
-        gemini_mock.generate_reply.assert_awaited_once_with(
-            subject="Warranty", body="My laptop broke.", attachments=[], thread=[]
-        )
+        agent_mock.assert_awaited_once()
+        assert _call(agent_mock).args[0] is app.state.gemini
+        kwargs = _call(agent_mock).kwargs
+        assert kwargs["subject"] == "Warranty"
+        assert kwargs["body"] == "My laptop broke."
+        assert kwargs["attachments"] == []
+        assert kwargs["thread"] == []
 
-    def test_subject_is_optional(self, client: TestClient, gemini_mock: AsyncMock) -> None:
+    def test_subject_is_optional(self, client: TestClient, agent_mock: AsyncMock) -> None:
         """Verify a request without a subject is accepted."""
         response = client.post("/v1/chat", data={"body": "Hello?"})
 
         assert response.status_code == 200
-        gemini_mock.generate_reply.assert_awaited_once_with(
-            subject="", body="Hello?", attachments=[], thread=[]
-        )
+        assert _call(agent_mock).kwargs["subject"] == ""
 
-    def test_missing_body_is_rejected(self, client: TestClient, gemini_mock: AsyncMock) -> None:
+    def test_missing_body_is_rejected(self, client: TestClient, agent_mock: AsyncMock) -> None:
         """Verify a request without a body fails validation and skips the LLM."""
         response = client.post("/v1/chat", data={"subject": "Warranty"})
 
         assert response.status_code == 422
-        gemini_mock.generate_reply.assert_not_awaited()
+        agent_mock.assert_not_awaited()
 
-    def test_llm_error_maps_to_502(self, client: TestClient, gemini_mock: AsyncMock) -> None:
+    def test_llm_error_maps_to_502(self, client: TestClient, agent_mock: AsyncMock) -> None:
         """Verify an LLM failure is reported as a bad gateway."""
-        gemini_mock.generate_reply.side_effect = LLMError("Gemini request failed")
+        agent_mock.side_effect = LLMError("Gemini request failed")
 
         response = client.post("/v1/chat", data={"body": "Hello?"})
 
@@ -73,10 +84,10 @@ class TestChat:
         assert "Gemini request failed" in response.json()["detail"]
 
     def test_unexpected_error_maps_to_500(
-        self, client: TestClient, gemini_mock: AsyncMock, caplog: pytest.LogCaptureFixture
+        self, client: TestClient, agent_mock: AsyncMock, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Verify an unexpected failure is logged and reported as a server error."""
-        gemini_mock.generate_reply.side_effect = RuntimeError("boom")
+        agent_mock.side_effect = RuntimeError("boom")
 
         with caplog.at_level("ERROR", logger="chatbot"):
             response = client.post("/v1/chat", data={"body": "Hello?"})
@@ -88,31 +99,31 @@ class TestChat:
 class TestChatThread:
     """Tests for POST /v1/chat with thread history."""
 
-    def test_thread_field_reaches_the_llm(self, client: TestClient, gemini_mock: AsyncMock) -> None:
+    def test_thread_field_reaches_the_llm(self, client: TestClient, agent_mock: AsyncMock) -> None:
         """Verify the thread JSON field is parsed and passed to the LLM client."""
         thread_json = '[{"role": "user", "text": "Q1"}, {"role": "assistant", "text": "A1"}]'
 
         response = client.post("/v1/chat", data={"body": "Follow-up.", "thread": thread_json})
 
         assert response.status_code == 200
-        thread = gemini_mock.generate_reply.await_args.kwargs["thread"]
+        thread = _call(agent_mock).kwargs["thread"]
         assert thread == [
             ThreadMessage(role="user", text="Q1"),
             ThreadMessage(role="assistant", text="A1"),
         ]
 
     def test_invalid_thread_json_is_rejected(
-        self, client: TestClient, gemini_mock: AsyncMock
+        self, client: TestClient, agent_mock: AsyncMock
     ) -> None:
         """Verify malformed thread JSON yields 422 and skips the LLM."""
         response = client.post("/v1/chat", data={"body": "Hello?", "thread": "not json"})
 
         assert response.status_code == 422
         assert "thread" in response.json()["detail"].lower()
-        gemini_mock.generate_reply.assert_not_awaited()
+        agent_mock.assert_not_awaited()
 
     def test_invalid_thread_role_is_rejected(
-        self, client: TestClient, gemini_mock: AsyncMock
+        self, client: TestClient, agent_mock: AsyncMock
     ) -> None:
         """Verify a thread message with an unknown role yields 422."""
         response = client.post(
@@ -121,13 +132,13 @@ class TestChatThread:
         )
 
         assert response.status_code == 422
-        gemini_mock.generate_reply.assert_not_awaited()
+        agent_mock.assert_not_awaited()
 
 
 class TestContractV1:
     """Guards the frozen v1 request/response contract. Do not change lightly."""
 
-    def test_full_request_shape(self, client: TestClient, gemini_mock: AsyncMock) -> None:
+    def test_full_request_shape(self, client: TestClient, agent_mock: AsyncMock) -> None:
         """Verify the complete v1 request is accepted and answered as {reply: str}."""
         response = client.post(
             "/v1/chat",
@@ -143,7 +154,7 @@ class TestContractV1:
         payload = response.json()
         assert set(payload.keys()) == {"reply"}
         assert isinstance(payload["reply"], str)
-        kwargs = gemini_mock.generate_reply.await_args.kwargs
+        kwargs = _call(agent_mock).kwargs
         assert kwargs["subject"] == "Warranty claim"
         assert kwargs["body"] == "See the attached invoice."
         assert len(kwargs["thread"]) == 2
@@ -154,7 +165,7 @@ class TestChatAttachments:
     """Tests for POST /v1/chat with uploaded files."""
 
     def test_valid_attachment_reaches_the_llm(
-        self, client: TestClient, gemini_mock: AsyncMock
+        self, client: TestClient, agent_mock: AsyncMock
     ) -> None:
         """Verify an uploaded file is validated and passed to the LLM client."""
         response = client.post(
@@ -164,14 +175,14 @@ class TestChatAttachments:
         )
 
         assert response.status_code == 200
-        attachments = gemini_mock.generate_reply.await_args.kwargs["attachments"]
+        attachments = _call(agent_mock).kwargs["attachments"]
         assert len(attachments) == 1
         assert attachments[0].filename == "doc.pdf"
         assert attachments[0].mime_type == "application/pdf"
         assert attachments[0].data == b"%PDF-1.4"
 
     def test_multiple_attachments_are_passed_in_order(
-        self, client: TestClient, gemini_mock: AsyncMock
+        self, client: TestClient, agent_mock: AsyncMock
     ) -> None:
         """Verify several uploaded files keep their order."""
         response = client.post(
@@ -184,10 +195,10 @@ class TestChatAttachments:
         )
 
         assert response.status_code == 200
-        attachments = gemini_mock.generate_reply.await_args.kwargs["attachments"]
+        attachments = _call(agent_mock).kwargs["attachments"]
         assert [a.filename for a in attachments] == ["a.pdf", "b.png"]
 
-    def test_unsupported_type_is_rejected(self, client: TestClient, gemini_mock: AsyncMock) -> None:
+    def test_unsupported_type_is_rejected(self, client: TestClient, agent_mock: AsyncMock) -> None:
         """Verify an unsupported file type yields 422 and skips the LLM."""
         response = client.post(
             "/v1/chat",
@@ -197,10 +208,10 @@ class TestChatAttachments:
 
         assert response.status_code == 422
         assert "archive.zip" in response.json()["detail"]
-        gemini_mock.generate_reply.assert_not_awaited()
+        agent_mock.assert_not_awaited()
 
     def test_oversized_attachment_is_rejected(
-        self, client: TestClient, gemini_mock: AsyncMock
+        self, client: TestClient, agent_mock: AsyncMock
     ) -> None:
         """Verify a file above the configured limit yields 413 and skips the LLM."""
         response = client.post(
@@ -210,9 +221,9 @@ class TestChatAttachments:
         )
 
         assert response.status_code == 413
-        gemini_mock.generate_reply.assert_not_awaited()
+        agent_mock.assert_not_awaited()
 
-    def test_empty_attachment_is_rejected(self, client: TestClient, gemini_mock: AsyncMock) -> None:
+    def test_empty_attachment_is_rejected(self, client: TestClient, agent_mock: AsyncMock) -> None:
         """Verify an empty file yields 422 and skips the LLM."""
         response = client.post(
             "/v1/chat",
@@ -221,4 +232,30 @@ class TestChatAttachments:
         )
 
         assert response.status_code == 422
-        gemini_mock.generate_reply.assert_not_awaited()
+        agent_mock.assert_not_awaited()
+
+
+class TestWebSearchWiring:
+    """Tests for handing tools and loop limits from app state to the agent."""
+
+    def test_default_state_offers_no_tools(self, client: TestClient, agent_mock: AsyncMock) -> None:
+        """Verify the agent gets an empty tool set unless tools are configured."""
+        response = client.post("/v1/chat", data={"body": "Hello?"})
+
+        assert response.status_code == 200
+        assert _call(agent_mock).kwargs["tools"] == {}
+
+    def test_configured_tools_and_limits_reach_the_agent(
+        self, client: TestClient, agent_mock: AsyncMock
+    ) -> None:
+        """Verify the state tool set and settings limits are passed through."""
+        tools = {"web_search": AsyncMock()}
+        app.state.web_tools = tools
+
+        response = client.post("/v1/chat", data={"body": "Hello?"})
+
+        assert response.status_code == 200
+        kwargs = _call(agent_mock).kwargs
+        assert kwargs["tools"] is tools
+        assert kwargs["max_iterations"] == app.state.settings.agent_max_iterations
+        assert kwargs["deadline_seconds"] == app.state.settings.agent_deadline_seconds
