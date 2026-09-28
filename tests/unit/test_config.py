@@ -59,7 +59,7 @@ class TestWebSearchSettings:
         assert settings.web_search_enabled is False
         assert settings.brave_api_key is None
         assert settings.brave_max_results == 5
-        assert settings.agent_max_iterations == 6
+        assert settings.agent_max_iterations == 4
         assert settings.agent_deadline_seconds == 90
 
     def test_enabled_with_key_from_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
