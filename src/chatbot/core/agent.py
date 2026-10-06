@@ -17,7 +17,12 @@ Tool = Callable[..., Awaitable[Any]]
 _DECLARATIONS = {
     "web_search": types.FunctionDeclaration(
         name="web_search",
-        description="Search the web for current information.",
+        description=(
+            "Search the web for current information: prices, availability, "
+            "news, or anything time-sensitive. Always search before claiming "
+            "that a product is unavailable, unknown or not yet released. "
+            "Keep the query short and generic."
+        ),
         parameters={
             "type": "object",
             "properties": {"query": {"type": "string", "description": "Search query."}},

@@ -72,6 +72,24 @@ class TestWebSearchSettings:
         assert settings.web_search_enabled is True
         assert settings.brave_api_key == "test-key"
 
+    def test_enabled_appends_tool_rules_to_prompt(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verify the model is told about web_search when the tool is offered."""
+        monkeypatch.setenv("WEB_SEARCH_ENABLED", "true")
+        monkeypatch.setenv("BRAVE_API_KEY", "test-key")
+
+        settings = Settings(_env_file=None)
+
+        assert "web_search" in settings.system_prompt
+
+    def test_disabled_keeps_tool_rules_out_of_prompt(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verify the prompt never mentions a tool the model does not have."""
+        monkeypatch.delenv("WEB_SEARCH_ENABLED", raising=False)
+        monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+
+        settings = Settings(_env_file=None)
+
+        assert "web_search" not in settings.system_prompt
+
     def test_enabled_without_key_fails_fast(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify a misconfiguration is rejected at startup, not at request time."""
         monkeypatch.setenv("WEB_SEARCH_ENABLED", "true")
